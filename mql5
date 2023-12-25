@@ -1,0 +1,141 @@
+mql5
+// Scalping Grid Trading Bot
+// Developer's Site: forexroboteasy.com
+// Developed by: Forex Robot Easy Team
+
+// Include necessary libraries and define global variables
+#include <Trade\Trade.mqh>
+#include <Array\ArrayObj.mqh>
+#include <Object\Object.mqh>
+
+input double GridSize = 10; // Grid size in pips
+input double StepSize = 5; // Step size in pips
+input double Range = 50; // Range in pips
+input double StopLoss = 20; // Stop loss in pips
+input double TakeProfit = 30; // Take profit in pips
+input double MaxDrawdown = 1000; // Maximum allowed drawdown in account currency
+
+CTrade trade; // Trade object for order execution
+CArrayObj positions; // Array to store open positions
+CArrayObj orders; // Array to store pending orders
+
+// Function to initiate the grid trading strategy
+void InitiateGridTrading() {
+   double currentPrice = SymbolInfoDouble(_Symbol, SYMBOL_BID); // Get current price
+   double buyPrice = NormalizeDouble(currentPrice - Range / 2, _Digits); // Calculate buy price
+   double sellPrice = NormalizeDouble(currentPrice + Range / 2, _Digits); // Calculate sell price
+
+   // Place buy and sell orders at predetermined price levels within the grid
+   for (double price = buyPrice; price <= sellPrice; price += StepSize) {
+      // Place buy order
+      int ticketBuy = trade.BuyStop(GridSize, price, price - StopLoss, price + TakeProfit, NULL);
+      if (ticketBuy > 0) {
+         CObject objBuy(ticketBuy, OBJ_TREND, 0, price, price - StopLoss);
+         orders.Insert(objBuy); // Store pending buy order
+      }
+      
+      // Place sell order
+      int ticketSell = trade.SellStop(GridSize, price, price + StopLoss, price - TakeProfit, NULL);
+      if (ticketSell > 0) {
+         CObject objSell(ticketSell, OBJ_TREND, 0, price, price + StopLoss);
+         orders.Insert(objSell); // Store pending sell order
+      }
+   }
+}
+
+// Function to manage open positions
+void ManagePositions() {
+   // Loop through open positions
+   for (int i = 0; i < positions.Total(); i++) {
+      if (!trade.PositionSelect(positions.At(i).Ticket())) continue;
+
+      double currentPrice = SymbolInfoDouble(_Symbol, SYMBOL_BID); // Get current price
+      double stopLoss = trade.PositionGetDouble(POSITION_SL); // Get stop loss
+      double takeProfit = trade.PositionGetDouble(POSITION_TP); // Get take profit
+
+      // Modify position based on predefined conditions
+      if (currentPrice <= stopLoss) {
+         trade.PositionModify(positions.At(i).Ticket(), currentPrice, takeProfit);
+      } else if (currentPrice >= takeProfit) {
+         trade.PositionModify(positions.At(i).Ticket(), stopLoss, currentPrice);
+      }
+   }
+}
+
+// Function to execute order placement and cancellation
+void ExecuteOrders() {
+   // Loop through pending orders
+   for (int i = 0; i < orders.Total(); i++) {
+      int ticket = orders.At(i).Ticket();
+      if (trade.OrderSelect(ticket, SELECT_BY_TICKET)) {
+         // Cancel order if it is not triggered within a specified time
+         if (trade.OrderType() == ORDER_TYPE_BUY_STOP || trade.OrderType() == ORDER_TYPE_SELL_STOP) {
+            if (TimeCurrent() - trade.OrderOpenTime() > 60 * 5) {
+               trade.OrderDelete(ticket);
+               orders.Delete(i);
+               i--;
+            }
+         }
+      } else {
+         orders.Delete(i);
+         i--;
+      }
+   }
+}
+
+// Function to calculate overall risk exposure
+double CalculateRiskExposure() {
+   double totalRiskExposure = 0;
+
+   // Loop through open positions
+   for (int i = 0; i < positions.Total(); i++) {
+      if (!trade.PositionSelect(positions.At(i).Ticket())) continue;
+      double positionRisk = trade.PositionGetDouble(POSITION_MARGIN) * trade.PositionGetDouble(POSITION_VOLUME);
+      totalRiskExposure += positionRisk;
+   }
+
+   return totalRiskExposure;
+}
+
+// Function to perform market analysis
+void PerformMarketAnalysis() {
+   // Implement market analysis indicators here
+   // Example: Calculate moving averages, RSI, etc.
+}
+
+// Function to backtest and optimize the bot's parameters
+void BacktestAndOptimize() {
+   // Implement backtesting and optimization techniques here
+   // Example: Use historical data to evaluate performance and fine-tune parameters
+}
+
+// Main function
+void OnTick() {
+   InitiateGridTrading(); // Initiate grid trading strategy
+   ManagePositions(); // Manage open positions
+   ExecuteOrders(); // Execute order placement and cancellation
+   
+   double riskExposure = CalculateRiskExposure(); // Calculate overall risk exposure
+   if (riskExposure >= MaxDrawdown) {
+      // Close all positions and stop the bot if maximum drawdown is reached
+      for (int i = 0; i < positions.Total(); i++) {
+         if (!trade.PositionSelect(positions.At(i).Ticket())) continue;
+         trade.PositionClose(positions.At(i).Ticket());
+      }
+      ExpertRemove();
+   }
+   
+   PerformMarketAnalysis(); // Perform market analysis
+   BacktestAndOptimize(); // Perform backtesting and optimization
+}
+
+// Entry point of the program
+void OnStart() {
+   trade.SetDeviationInPoints(5); // Set deviation for order execution
+   trade.SetExpertMagicNumber(123456); // Set magic number for identifying orders
+
+   while (true) {
+      OnTick(); // Call the main function
+      Sleep(1000); // Sleep for 1 second
+   }
+}
